@@ -1,0 +1,129 @@
+---
+title: "bootstrapping"
+author: "Hana Akbarnejad"
+date: "11/14/2019"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+```
+
+```{r}
+
+n_samp = 250
+
+sim_df_const = 
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst = sim_df_const %>% 
+  mutate(
+  error = error * .75 * x,
+  y = 2 + 3 * x + error
+)
+
+sim_df = 
+  bind_rows(const = sim_df_const, nonconst = sim_df_nonconst, .id = "data_source") 
+
+sim_df %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm") +
+  facet_grid(~data_source)
+```
+In the plot on right we have non-constant variance (different variability in the start and ending of the line and data scattering!)
+
+Fit two models:
+```{r}
+
+sim_df_const %>% 
+  lm(y ~x, data = .) %>% 
+  broom::tidy()
+
+sim_df_nonconst %>% 
+  lm(y ~x, data = .) %>% 
+  broom::tidy()
+```
+This is wrong! variability should be higher than this in nonconstant! Can we do some bootsrapping to fix this result?! (happens because R has some assumptions which are not always true)
+
+# Boostrapping code:
+write a function to draw bootsrap sample baed on the df:
+```{r}
+
+boot_sample = function(df) {
+  sample_frac(df, replace = TRUE)
+}
+```
+visualizing:
+```{r}
+
+boot_sample(sim_df_nonconst) %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_point(alpha = .5) +
+  stat_smooth(method = "lm")
+```
+
+Now we want to analyze many bootsrap samples instead of one!
+```{r}
+
+boot_straps = 
+  data_frame(
+    strap_number = 1:1000,
+    strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+  )
+```
+
+Do some kind of analysis:
+```{r}
+
+bootstrap_results = 
+  boot_straps %>% 
+  mutate(
+    models = map(strap_sample, ~lm(y~x, data = .x)),
+    results = map (models, broom::tidy)
+  ) %>% 
+  select (- strap_sample, -models) %>% 
+  unnest(results)
+```
+
+summarize results:
+```{r}
+
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(se = sd(estimate))
+```
+These results are different from what we got previousely from nonconstant sample!
+
+Trying 'modelr' package: (doesnt require sample fraction and stuff!)
+how to generate bootsrap sample is the only thing which is different from bootsrap function. the rest of the process is exactly the same.
+```{r}
+
+boot_straps = 
+  sim_df_nonconst %>% 
+  modelr::bootstrap(1000)
+```
+
+## what if your assumptions aren't wrong?
+bootsrap will give us the same result!
+```{r}
+
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~lm(y ~ x, data = .x) ),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+```
+
