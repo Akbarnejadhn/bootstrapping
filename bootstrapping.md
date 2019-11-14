@@ -59,7 +59,9 @@ sim_df_nonconst %>%
     ## 1 (Intercept)     1.93    0.105       18.5 1.88e- 48
     ## 2 x               3.11    0.0747      41.7 5.76e-114
 
-This is wrong\! Can we do some bootsrapping to fix this?\!
+This is wrong\! variability should be higher than this in nonconstant\!
+Can we do some bootsrapping to fix this result?\! (happens because R has
+some assumptions which are not always true)
 
 # Boostrapping code:
 
@@ -107,3 +109,100 @@ bootstrap_results =
   select (- strap_sample, -models) %>% 
   unnest(results)
 ```
+
+summarize results:
+
+``` r
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(se = sd(estimate))
+```
+
+    ## # A tibble: 2 x 2
+    ##   term            se
+    ##   <chr>        <dbl>
+    ## 1 (Intercept) 0.0747
+    ## 2 x           0.101
+
+These results are different from what we got previousely from
+nonconstant sample\!
+
+Trying ‘modelr’ package: (doesnt require sample fraction and stuff\!)
+how to generate bootsrap sample is the only thing which is different
+from bootsrap function. the rest of the process is exactly the same.
+
+``` r
+boot_straps = 
+  sim_df_nonconst %>% 
+  modelr::bootstrap(1000)
+```
+
+## what if your assumptions aren’t wrong?
+
+bootsrap will give us the same result\!
+
+``` r
+sim_df_const %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(models = map(strap, ~lm(y ~ x, data = .x) ),
+         results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  group_by(term) %>% 
+  summarize(boot_se = sd(estimate))
+```
+
+    ## # A tibble: 2 x 2
+    ##   term        boot_se
+    ##   <chr>         <dbl>
+    ## 1 (Intercept)  0.0985
+    ## 2 x            0.0697
+
+# An example of when things don’t work the way we expect them to:
+
+``` r
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+```
+
+``` r
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point() 
+```
+
+    ## Warning: Removed 9962 rows containing missing values (geom_point).
+
+![](bootstrapping_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
+the relationship between stars and price doesnt work how we expect
+because of the extreme outliers we have. So we need a more realistics
+approach to see the distribution of slope.
+
+``` r
+airbnb_results = nyc_airbnb %>% 
+  filter(boro == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~ lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(results) %>% 
+  unnest(results) 
+
+# make a plot of stars distribution:
+airbnb_results %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) + geom_density()    # we can see that the plot is skewed!
+```
+
+![](bootstrapping_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+we can solve this with help of bootsrapping\!

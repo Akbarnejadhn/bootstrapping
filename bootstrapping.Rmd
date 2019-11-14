@@ -127,3 +127,46 @@ sim_df_const %>%
   summarize(boot_se = sd(estimate))
 ```
 
+# An example of when things don't work the way we expect them to:
+```{r}
+
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+```
+
+
+```{r}
+
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point() 
+```
+
+the relationship between stars and price doesnt work how we expect because of the extreme outliers we have. So we need a more realistics approach to see the distribution of slope.
+
+```{r}
+
+airbnb_results = nyc_airbnb %>% 
+  filter(boro == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~ lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)) %>% 
+  select(results) %>% 
+  unnest(results) 
+
+# make a plot of stars distribution:
+airbnb_results %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(x = estimate)) + geom_density()    # we can see that the plot is skewed!
+```
+
+we can solve this with help of bootsrapping!
